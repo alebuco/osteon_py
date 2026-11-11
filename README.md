@@ -19,15 +19,19 @@ Gera instaladores para **Windows** (.exe) e **Linux** (AppImage).
   fragmentos (cor, visibilidade, afastamento/explode), **corte por laço** (separa
   a região dentro do contorno desenhado na tela) e exportação STL por fragmento
   ou de todos juntos.
+- **Registro / Sobreposição**: importa um STL e o alinha ao modelo em duas
+  janelas lado a lado — pontos correspondentes (`vtkCellPicker`), registro por
+  landmarks (`vtkLandmarkTransform`, rígido ou com escala), refino **ICP**
+  (`vtkIterativeClosestPointTransform`), **mapa de desvio** por distância
+  ponto-superfície (`vtkImplicitPolyDataDistance`) com média/máx, ajuste manual,
+  exportação do alinhado e salvar/carregar o registro em JSON.
 - **Cadastro de paciente**: nome, nascimento, nº de registro — pré-preenchido do
   DICOM e salvo localmente (JSON na pasta de dados do usuário); nomeia os
   arquivos exportados.
 - **Fantoma de demonstração** para abrir sem dados.
 
-> Em desenvolvimento (próximas iterações), reaproveitando o que o VTK oferece:
-> MPR, cefalometria, **Registro** (landmarks com `vtkLandmarkTransform` + ICP com
-> `vtkIterativeClosestPointTransform` + mapa de desvio via
-> `vtkDistancePolyDataFilter`) e relatório PDF.
+> Em desenvolvimento (próximas iterações): MPR, cefalometria, histograma do
+> desvio e relatório PDF.
 
 ## Rodar a partir do código (qualquer SO)
 
