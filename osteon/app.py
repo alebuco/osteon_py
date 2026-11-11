@@ -6,8 +6,10 @@ from .ui.main_window import MainWindow
 
 
 def main():
+    from . import __version__
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("Osteon Viewer")
+    app.setApplicationVersion(__version__)
     app.setOrganizationName("Osteon")
     win = MainWindow()
     win.show()

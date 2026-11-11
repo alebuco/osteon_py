@@ -10,6 +10,26 @@ import vtk  # noqa: E402
 from PySide6 import QtCore, QtWidgets  # noqa: E402
 
 
+def render_histogram(dists, scale_mm, w, h, nbins=24):
+    """Desenha o histograma do desvio (barras coloridas azul->vermelho) num QPixmap."""
+    import numpy as np
+    pix = QtGui.QPixmap(int(w), int(h)); pix.fill(QtGui.QColor(12, 17, 22))
+    if dists is None or len(dists) == 0 or scale_mm <= 0:
+        return pix
+    edges = np.linspace(0, scale_mm, nbins + 1)
+    counts, _ = np.histogram(np.clip(np.abs(dists), 0, scale_mm), bins=edges)
+    mx = max(1, int(counts.max()))
+    p = QtGui.QPainter(pix)
+    bw = w / nbins
+    for i, cnt in enumerate(counts):
+        frac = (i + 0.5) / nbins
+        col = QtGui.QColor.fromHsvF(max(0.0, 0.667 * (1 - frac)), 1.0, 1.0)
+        bh = (cnt / mx) * (h - 2)
+        p.fillRect(QtCore.QRectF(i * bw, h - bh, max(1.0, bw - 1), bh), col)
+    p.end()
+    return pix
+
+
 class _Pane(QtWidgets.QWidget):
     picked = QtCore.Signal(tuple)
 

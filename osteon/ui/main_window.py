@@ -4,21 +4,25 @@ from __future__ import annotations
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..core import dicom_io
+from ..core import cephalometry as cephmod
 from ..viewers.slice_view import SliceView
+from ..viewers.mpr_view import MPRView
+from ..viewers.ceph_view import CephView
 from .patient_panel import PatientPanel
 
 try:
     from ..viewers.volume_view import VolumeView
     from ..viewers.segment_view import SegmentView, PALETTE
-    from ..viewers.register_view import RegisterView
+    from ..viewers.register_view import RegisterView, render_histogram
     from ..core import mesh as meshmod
     from ..core import segment as segmod
     from ..core import register as regmod
+    from ..core import report as reportmod
     import vtk as _vtk
     _HAS_VTK = True
 except Exception as _e:  # VTK ausente -> 3D/Modelo/Segmentar/Registro desabilitados
-    VolumeView = SegmentView = RegisterView = None
-    meshmod = segmod = regmod = _vtk = None
+    VolumeView = SegmentView = RegisterView = render_histogram = None
+    meshmod = segmod = regmod = reportmod = _vtk = None
     PALETTE = [(0.82, 0.82, 0.88)]
     _HAS_VTK = False
     _VTK_ERR = str(_e)
@@ -118,6 +122,59 @@ class SegmentPanel(QtWidgets.QGroupBox):
         lay.addWidget(b_reset)
 
 
+class CephPanel(QtWidgets.QGroupBox):
+    pointSelected = QtCore.Signal(str)
+    clearPts = QtCore.Signal()
+
+    def __init__(self, parent=None):
+        super().__init__("Cefalometria", parent)
+        self.listw = QtWidgets.QListWidget()
+        for sig, name in cephmod.POINTS:
+            it = QtWidgets.QListWidgetItem(f"{sig} — {name}")
+            it.setData(QtCore.Qt.UserRole, sig)
+            self.listw.addItem(it)
+        self.listw.setCurrentRow(0)
+        self.listw.currentItemChanged.connect(
+            lambda cur, _p: cur and self.pointSelected.emit(cur.data(QtCore.Qt.UserRole)))
+        b_clear = QtWidgets.QPushButton("Limpar pontos"); b_clear.clicked.connect(self.clearPts)
+
+        self.table = QtWidgets.QTableWidget(len(cephmod.ANALYSES), 3)
+        self.table.setHorizontalHeaderLabels(["Análise", "Valor", "Normal"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        for i, (name, _k, _a, _d) in enumerate(cephmod.ANALYSES):
+            self.table.setItem(i, 0, QtWidgets.QTableWidgetItem(name))
+            self.table.setItem(i, 1, QtWidgets.QTableWidgetItem("—"))
+            lo = cephmod.NORMS.get(name)
+            self.table.setItem(i, 2, QtWidgets.QTableWidgetItem(f"{lo[0]:.0f} ± {lo[1]:.0f}" if lo else "—"))
+
+        hint = QtWidgets.QLabel("Selecione o ponto e clique na imagem. A lista avança sozinha.")
+        hint.setWordWrap(True); hint.setStyleSheet("color:#8aa;font-size:11px;")
+
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(hint)
+        lay.addWidget(self.listw)
+        lay.addWidget(b_clear)
+        lay.addWidget(self.table)
+
+    def current_sig(self):
+        it = self.listw.currentItem()
+        return it.data(QtCore.Qt.UserRole) if it else cephmod.POINTS[0][0]
+
+    def set_results(self, results):
+        for i, (name, _k, _a, _d) in enumerate(cephmod.ANALYSES):
+            v = results.get(name)
+            cell = self.table.item(i, 1)
+            if v is None or (isinstance(v, float) and v != v):
+                cell.setText("—"); cell.setForeground(QtGui.QBrush(QtGui.QColor(150, 160, 170)))
+                continue
+            cell.setText(f"{v:.1f}°")
+            lo = cephmod.NORMS.get(name)
+            ok = lo and abs(v - lo[0]) <= lo[1]
+            cell.setForeground(QtGui.QBrush(QtGui.QColor(120, 210, 140) if ok else QtGui.QColor(230, 170, 90)))
+
+
 class RegisterPanel(QtWidgets.QGroupBox):
     importStl = QtCore.Signal()
     pickToggled = QtCore.Signal(bool)
@@ -130,6 +187,7 @@ class RegisterPanel(QtWidgets.QGroupBox):
     exportAligned = QtCore.Signal()
     saveJson = QtCore.Signal()
     loadJson = QtCore.Signal()
+    reportPdf = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__("Registro / Sobreposição", parent)
@@ -152,9 +210,12 @@ class RegisterPanel(QtWidgets.QGroupBox):
         self.sc = QtWidgets.QDoubleSpinBox(); self.sc.setRange(0.5, 2.0); self.sc.setSingleStep(0.01); self.sc.setValue(1.0); self.sc.valueChanged.connect(self.manualChanged)
         self.opa = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.opa.setRange(20, 100); self.opa.setValue(70); self.opa.valueChanged.connect(self.manualChanged)
 
+        self.hist = QtWidgets.QLabel(); self.hist.setFixedHeight(60)
+        self.hist.setStyleSheet("background:#0c1116;border-radius:6px;")
         b_exp = QtWidgets.QPushButton("Exportar alinhado…"); b_exp.clicked.connect(self.exportAligned)
         b_save = QtWidgets.QPushButton("Salvar (.json)"); b_save.clicked.connect(self.saveJson)
         b_load = QtWidgets.QPushButton("Carregar"); b_load.clicked.connect(self.loadJson)
+        b_pdf = QtWidgets.QPushButton("Relatório PDF…"); b_pdf.clicked.connect(self.reportPdf)
 
         g = QtWidgets.QFormLayout()
         g.addRow("Transl. X/Y/Z", self._row(self.tx, self.ty, self.tz))
@@ -171,9 +232,11 @@ class RegisterPanel(QtWidgets.QGroupBox):
         lay.addLayout(self._row(b_lm, b_icp))
         lay.addWidget(self.dev)
         lay.addLayout(g)
+        lay.addWidget(self.hist)
         lay.addWidget(self.info)
         lay.addLayout(self._row(b_exp,))
         lay.addLayout(self._row(b_save, b_load))
+        lay.addWidget(b_pdf)
 
     def _spin(self, lo, hi):
         s = QtWidgets.QDoubleSpinBox(); s.setRange(lo, hi); s.setSingleStep(0.5)
@@ -193,7 +256,8 @@ class RegisterPanel(QtWidgets.QGroupBox):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Osteon Viewer")
+        from .. import __version__
+        self.setWindowTitle(f"Osteon Viewer {__version__}")
         self.resize(1360, 860)
         self.vol = None
         self.mesh = None
@@ -202,11 +266,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.seg_bounds = None
         self.reg_imp = None      # vtkPolyData importado
         self.reg_treg = regmod.identity() if _HAS_VTK else None  # 4x4
+        self.reg_stats = {}      # method/rms/icp/dev
+        self.reg_dists = None    # última distribuição de desvio
 
         # visor central
         self.slice_view = SliceView()
         self.stack = QtWidgets.QStackedWidget()
         self.stack.addWidget(self.slice_view)              # índice 0 = 2D
+        self.mpr_view = MPRView()
+        self.stack.addWidget(self.mpr_view)                # MPR (Qt puro)
+        self.ceph_view = CephView()
+        self.stack.addWidget(self.ceph_view)               # Cefalometria (Qt puro)
         if _HAS_VTK:
             self.volume_view = VolumeView()
             self.stack.addWidget(self.volume_view)         # índice 1 = 3D/Modelo
@@ -229,11 +299,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.register_panel = RegisterPanel()
         self._wire_register_panel()
         self.register_panel.setVisible(False)
+        self.ceph_panel = CephPanel()
+        self.ceph_panel.pointSelected.connect(self.ceph_view.set_current)
+        self.ceph_panel.clearPts.connect(self.ceph_view.clear_points)
+        self.ceph_view.changed.connect(self.update_ceph_results)
+        self.ceph_panel.setVisible(False)
         side = QtWidgets.QWidget(); sl = QtWidgets.QVBoxLayout(side)
         sl.addWidget(self.patient)
         sl.addWidget(self.model_panel)
         sl.addWidget(self.segment_panel)
         sl.addWidget(self.register_panel)
+        sl.addWidget(self.ceph_panel)
         sl.addStretch(1)
         dock = QtWidgets.QDockWidget("Painel", self)
         dock.setWidget(side)
@@ -253,11 +329,11 @@ class MainWindow(QtWidgets.QMainWindow):
         tb.setMovable(False)
         self.addToolBar(QtCore.Qt.LeftToolBarArea, tb)
         self.mode_group = QtGui.QActionGroup(self)
-        for key, label in [("2d", "2D"), ("3d", "3D"), ("model", "Modelo"), ("segment", "Segmentar"), ("register", "Registro")]:
+        for key, label in [("2d", "2D"), ("mpr", "MPR"), ("ceph", "Cefalo"), ("3d", "3D"), ("model", "Modelo"), ("segment", "Segmentar"), ("register", "Registro")]:
             act = QtGui.QAction(label, self, checkable=True)
             act.setData(key)
             act.triggered.connect(lambda _c, k=key: self.set_mode(k))
-            if key != "2d" and not _HAS_VTK:
+            if key in ("3d", "model", "segment", "register") and not _HAS_VTK:
                 act.setEnabled(False)
             self.mode_group.addAction(act)
             tb.addAction(act)
@@ -320,6 +396,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.model_panel.setVisible(key == "model")
         self.segment_panel.setVisible(key == "segment")
         self.register_panel.setVisible(key == "register")
+        self.ceph_panel.setVisible(key == "ceph")
+        if key == "mpr":
+            self.stack.setCurrentWidget(self.mpr_view)
+            if self.vol is not None:
+                self.mpr_view.set_volume(self.vol)
+            return
+        if key == "ceph":
+            self.stack.setCurrentWidget(self.ceph_view)
+            self.ceph_view.set_current(self.ceph_panel.current_sig())
+            if self.vol is not None:
+                self.ceph_view.set_volume(self.vol)
+            self.update_ceph_results()
+            return
         if key == "2d" or not _HAS_VTK:
             self.stack.setCurrentIndex(0)
             return
@@ -482,6 +571,10 @@ class MainWindow(QtWidgets.QMainWindow):
         tf = _vtk.vtkTransformPolyDataFilter(); tf.SetTransform(t); tf.SetInputData(poly); tf.Update()
         return tf.GetOutput()
 
+    # -- cefalometria -------------------------------------------------------
+    def update_ceph_results(self):
+        self.ceph_panel.set_results(cephmod.compute(self.ceph_view.landmarks_mm()))
+
     # -- registro -----------------------------------------------------------
     def _wire_register_panel(self):
         p = self.register_panel
@@ -496,6 +589,7 @@ class MainWindow(QtWidgets.QMainWindow):
         p.exportAligned.connect(self.on_reg_export)
         p.saveJson.connect(self.on_reg_save)
         p.loadJson.connect(self.on_reg_load)
+        p.reportPdf.connect(self.on_reg_report)
 
     def enter_register(self):
         if self.vol is None:
@@ -534,13 +628,17 @@ class MainWindow(QtWidgets.QMainWindow):
         op = self.register_panel.opa.value() / 100.0
         if self.register_panel.dev.isChecked():
             scale = self.register_panel.devScale.value()
-            colored, mean, mx, _d = regmod.deviation(world, self.mesh, scale)
+            colored, mean, mx, d = regmod.deviation(world, self.mesh, scale)
             self.register_view.set_overlay(colored, (1, 1, 1), 1.0, lut=regmod.jet_lut(scale))
-            self.register_panel.info.setText(
-                self.register_panel.info.text().split("Desvio:")[0]
-                + f"Desvio: média {mean:.2f} mm · máx {mx:.2f} mm")
+            self.reg_dists = d
+            self.reg_stats["dev"] = (mean, mx, scale)
+            hl = self.register_panel.hist
+            self.register_panel.hist.setPixmap(
+                render_histogram(d, scale, max(120, hl.width()), hl.height()))
+            self.register_panel.info.setText(f"Desvio: média {mean:.2f} mm · máx {mx:.2f} mm")
         else:
             self.register_view.set_overlay(world, (1.0, 0.72, 0.30), op)
+            self.register_panel.hist.clear()
 
     def on_reg_landmarks(self):
         self.register_panel.info.setText(
@@ -567,6 +665,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         mat, rms = regmod.landmark_register(b[:n], a[:n], scale=self.register_panel.scale.isChecked())
         self.reg_treg = mat
+        self.reg_stats["method"] = ("Landmarks (vtkLandmarkTransform)", f"RMS {rms:.2f} mm", n)
         self._reg_reset_manual()
         self.reg_update_overlay()
         self.register_panel.info.setText(f"Landmarks: RMS {rms:.2f} mm ({n} pares).")
@@ -582,6 +681,7 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
         self.reg_treg = np.asarray(delta, float) @ np.asarray(self.reg_treg, float)
+        self.reg_stats["method"] = ("ICP (vtkIterativeClosestPointTransform)", f"dist. média {meand:.2f} mm", None)
         self._reg_reset_manual()
         self.reg_update_overlay()
         self.register_panel.info.setText(f"ICP: distância média {meand:.2f} mm.")
@@ -633,6 +733,51 @@ class MainWindow(QtWidgets.QMainWindow):
         p.scale.setChecked(bool(d.get("scale", False)))
         self.reg_update_overlay()
         self.register_panel.info.setText("Registro carregado (importe o mesmo STL para ver a sobreposição).")
+
+    def on_reg_report(self):
+        import os, tempfile
+        if not reportmod.available():
+            QtWidgets.QMessageBox.information(
+                self, "Relatório PDF",
+                "O reportlab não está instalado. Instale com: pip install reportlab")
+            return
+        default = f"relatorio-{self.patient.slug()}.pdf"
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Relatório PDF", default, "PDF (*.pdf)")
+        if not path:
+            return
+        tmp = tempfile.mkdtemp(prefix="osteon_")
+        images = []
+        shot = os.path.join(tmp, "view.png")
+        self.register_view.grab().save(shot, "PNG")
+        images.append(("Sobreposição (anatômico | importado)", shot))
+        if self.reg_dists is not None and "dev" in self.reg_stats:
+            hp = os.path.join(tmp, "hist.png")
+            scale = self.reg_stats["dev"][2]
+            render_histogram(self.reg_dists, scale, 480, 150).save(hp, "PNG")
+            images.append((f"Histograma do desvio (0–{scale:g} mm)", hp))
+        m = self.vol.meta if self.vol else {}
+        header = {
+            "Paciente": self.patient.nome.text() or m.get("patient", "—"),
+            "Registro": self.patient.reg.text() or m.get("patient_id", "—"),
+            "Nascimento": self.patient.nasc.text() or m.get("birth", "—"),
+            "Série": m.get("series", "—"),
+        }
+        metrics = []
+        if "method" in self.reg_stats:
+            meth, val, n = self.reg_stats["method"]
+            metrics.append(("Método", meth))
+            metrics.append(("Erro de alinhamento", val + (f" ({n} pares)" if n else "")))
+        metrics.append(("Permitir escala", "sim" if self.register_panel.scale.isChecked() else "não"))
+        metrics.append(("Pontos de correspondência",
+                        f"{len(self.register_view.anat_lm)} anat / {len(self.register_view.imp_lm)} imp"))
+        if "dev" in self.reg_stats:
+            mean, mx, scale = self.reg_stats["dev"]
+            metrics.append(("Desvio importado→anatômico", f"média {mean:.2f} mm · máx {mx:.2f} mm (escala {scale:g} mm)"))
+        try:
+            reportmod.registration_report(path, header, metrics, images)
+            self.statusBar().showMessage(f"Relatório salvo: {path}")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Relatório PDF", str(e))
 
     def on_seg_export(self, all_frags):
         if not self.frags:

@@ -1,4 +1,4 @@
-# Osteon Viewer — versão Python (desktop)
+# Osteon Viewer — versão Python (desktop) · v0.0.3
 
 Reescrita do Osteon como aplicativo de desktop em **Python**, com interface
 **PySide6 (Qt6)** e núcleo de imagem médica em **VTK** + numpy/scipy/scikit-image.
@@ -10,6 +10,10 @@ Gera instaladores para **Windows** (.exe) e **Linux** (AppImage).
   orientação anatômica (ImageOrientationPatient) e metadados do paciente.
 - **2D**: visor de cortes axiais com janelamento (arraste com botão direito) e
   navegação (scroll / slider).
+- **MPR**: reconstrução multiplanar (axial/coronal/sagital) com cursor
+  sincronizado, proporção física correta e janelamento.
+- **Cefalometria**: projeção lateral (MIP), marcação de pontos e análises
+  angulares (SNA, SNB, ANB, SN-GoGn, FMA) comparadas a valores de referência.
 - **3D**: renderização volumétrica por ray casting (GPU) com função de
   transferência para osso.
 - **Modelo (STL)**: isosuperfície (flying edges) por limiar HU, suavização
@@ -24,14 +28,16 @@ Gera instaladores para **Windows** (.exe) e **Linux** (AppImage).
   landmarks (`vtkLandmarkTransform`, rígido ou com escala), refino **ICP**
   (`vtkIterativeClosestPointTransform`), **mapa de desvio** por distância
   ponto-superfície (`vtkImplicitPolyDataDistance`) com média/máx, ajuste manual,
-  exportação do alinhado e salvar/carregar o registro em JSON.
+  exportação do alinhado, **histograma do desvio**, **relatório PDF** e
+  salvar/carregar o registro em JSON.
 - **Cadastro de paciente**: nome, nascimento, nº de registro — pré-preenchido do
   DICOM e salvo localmente (JSON na pasta de dados do usuário); nomeia os
   arquivos exportados.
 - **Fantoma de demonstração** para abrir sem dados.
 
-> Em desenvolvimento (próximas iterações): MPR, cefalometria, histograma do
-> desvio e relatório PDF.
+> Paridade com o protótipo JS concluída. Próximos possíveis: planejamento de
+> osteotomia (reposicionar fragmentos com números), medições de volume/espessura
+> e salvar/abrir um "caso" completo.
 
 ## Rodar a partir do código (qualquer SO)
 

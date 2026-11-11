@@ -3,7 +3,7 @@
 ; Compile com: iscc packaging\osteon.iss   (ou via Inno Setup IDE)
 
 #define AppName "Osteon Viewer"
-#define AppVersion "1.0.0"
+#define AppVersion "0.0.3"
 #define AppPublisher "Osteon"
 #define AppExe "Osteon.exe"
 
