@@ -64,7 +64,8 @@ class ModelPanel(QtWidgets.QGroupBox):
 class SegmentPanel(QtWidgets.QGroupBox):
     cut = QtCore.Signal()
     planeChanged = QtCore.Signal()
-    explode = QtCore.Signal()
+    moveChanged = QtCore.Signal()
+    measure = QtCore.Signal()
     reset = QtCore.Signal()
     exportOne = QtCore.Signal()
     exportAll = QtCore.Signal()
@@ -82,7 +83,8 @@ class SegmentPanel(QtWidgets.QGroupBox):
         self.tb = QtWidgets.QSpinBox(); self.tb.setRange(-90, 90)
         self.showPlane = QtWidgets.QCheckBox("Mostrar plano"); self.showPlane.setChecked(True)
         self.cap = QtWidgets.QCheckBox("Fechar face (sólido)"); self.cap.setChecked(True)
-        self.explodeS = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.explodeS.setRange(0, 60); self.explodeS.setValue(0)
+        self.mtx = self._mspin(-150, 150); self.mty = self._mspin(-150, 150); self.mtz = self._mspin(-150, 150)
+        self.mrx = self._mspin(-180, 180); self.mry = self._mspin(-180, 180); self.mrz = self._mspin(-180, 180)
         self.info = QtWidgets.QLabel(""); self.info.setWordWrap(True); self.info.setStyleSheet("color:#9bb;font-size:11px;")
 
         for w in (self.axis,):
@@ -92,7 +94,8 @@ class SegmentPanel(QtWidgets.QGroupBox):
         for w in (self.ta, self.tb):
             w.valueChanged.connect(self.planeChanged)
         self.showPlane.toggled.connect(self.planeChanged)
-        self.explodeS.valueChanged.connect(self.explode)
+        for w in (self.mtx, self.mty, self.mtz, self.mrx, self.mry, self.mrz):
+            w.valueChanged.connect(self.moveChanged)
 
         form = QtWidgets.QFormLayout()
         form.addRow("Fragmento", self.sel)
@@ -108,18 +111,42 @@ class SegmentPanel(QtWidgets.QGroupBox):
         self.b_lasso = QtWidgets.QPushButton("Traçado livre (laço)"); self.b_lasso.setCheckable(True)
         self.b_lasso.toggled.connect(self.lassoToggled)
         b_reset = QtWidgets.QPushButton("Resetar"); b_reset.clicked.connect(self.reset)
+        b_meas = QtWidgets.QPushButton("Volume / área"); b_meas.clicked.connect(self.measure)
         b_e1 = QtWidgets.QPushButton("Exportar fragmento"); b_e1.clicked.connect(self.exportOne)
         b_e2 = QtWidgets.QPushButton("Exportar todos"); b_e2.clicked.connect(self.exportAll)
+
+        repo = QtWidgets.QGroupBox("Reposicionar (osteotomia)")
+        rf = QtWidgets.QFormLayout(repo)
+        rf.addRow("Transl. X/Y/Z", self._row(self.mtx, self.mty, self.mtz))
+        rf.addRow("Rot. X/Y/Z", self._row(self.mrx, self.mry, self.mrz))
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.addLayout(form)
         lay.addWidget(b_cut)
         lay.addWidget(self.b_lasso)
-        lay.addWidget(QtWidgets.QLabel("Afastar (mm)"))
-        lay.addWidget(self.explodeS)
+        lay.addWidget(repo)
+        lay.addWidget(b_meas)
         lay.addWidget(self.info)
         row = QtWidgets.QHBoxLayout(); row.addWidget(b_e1); row.addWidget(b_e2); lay.addLayout(row)
         lay.addWidget(b_reset)
+
+    def _mspin(self, lo, hi):
+        s = QtWidgets.QDoubleSpinBox(); s.setRange(lo, hi); s.setSingleStep(0.5); s.setValue(0); return s
+
+    def _row(self, *ws):
+        h = QtWidgets.QHBoxLayout()
+        for w in ws:
+            h.addWidget(w)
+        return h
+
+    def move(self):
+        return dict(tx=self.mtx.value(), ty=self.mty.value(), tz=self.mtz.value(),
+                    rx=self.mrx.value(), ry=self.mry.value(), rz=self.mrz.value())
+
+    def set_move(self, mv):
+        for key, w in (("tx", self.mtx), ("ty", self.mty), ("tz", self.mtz),
+                       ("rx", self.mrx), ("ry", self.mry), ("rz", self.mrz)):
+            w.blockSignals(True); w.setValue(float((mv or {}).get(key, 0))); w.blockSignals(False)
 
 
 class CephPanel(QtWidgets.QGroupBox):
@@ -343,9 +370,12 @@ class MainWindow(QtWidgets.QMainWindow):
         m = self.menuBar().addMenu("Arquivo")
         a_open = QtGui.QAction("Abrir pasta DICOM…", self); a_open.triggered.connect(self.open_dicom)
         a_demo = QtGui.QAction("Abrir demonstração", self); a_demo.triggered.connect(self.open_demo)
+        a_savec = QtGui.QAction("Salvar caso…", self); a_savec.triggered.connect(self.save_case)
+        a_openc = QtGui.QAction("Abrir caso…", self); a_openc.triggered.connect(self.open_case)
         a_quit = QtGui.QAction("Sair", self); a_quit.triggered.connect(self.close)
         for a in (a_open, a_demo):
             m.addAction(a)
+        m.addSeparator(); m.addAction(a_savec); m.addAction(a_openc)
         m.addSeparator(); m.addAction(a_quit)
 
     def _apply_style(self):
@@ -388,6 +418,93 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def open_demo(self):
         self._set_volume(dicom_io.demo_volume())
+
+    # -- caso (salvar/abrir) ------------------------------------------------
+    def save_case(self):
+        from ..core import case as casemod
+        default = f"caso-{self.patient.slug()}.osteon"
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Salvar caso", default, "Caso Osteon (*.osteon)")
+        if not path:
+            return
+        import numpy as np
+        state = {
+            "version": 1,
+            "patient": {"nome": self.patient.nome.text(), "nasc": self.patient.nasc.text(),
+                        "registro": self.patient.reg.text()},
+            "model_params": {"hu": self.model_panel.hu.value(), "smooth": self.model_panel.smooth.value(),
+                             "dec": self.model_panel.dec.value(), "largest": self.model_panel.largest.isChecked()},
+        }
+        meshes = {}
+        if _HAS_VTK:
+            state["segment"] = {"fragments": [
+                {"name": f["name"], "color": list(f["color"]), "move": f.get("move") or self._zero_move(),
+                 "visible": f["visible"]} for f in self.frags]}
+            state["register"] = {
+                "anat_lm": self.register_view.anat_lm, "imp_lm": self.register_view.imp_lm,
+                "treg": np.asarray(self.reg_treg, float).tolist(),
+                "manual": self.register_panel.manual(), "scale": self.register_panel.scale.isChecked()}
+            state["ceph"] = {"landmarks": {k: list(v) for k, v in self.ceph_view.landmarks.items()}}
+            if self.mesh is not None:
+                meshes["model"] = self.mesh
+            for i, f in enumerate(self.frags):
+                meshes[f"frag_{i:03d}"] = f["poly"]
+            if self.reg_imp is not None:
+                meshes["imported"] = self.reg_imp
+        try:
+            casemod.save_case(path, state, self.vol, meshes)
+            self.statusBar().showMessage(f"Caso salvo: {path}")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Salvar caso", str(e))
+
+    def open_case(self):
+        from ..core import case as casemod
+        import numpy as np
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Abrir caso", "", "Caso Osteon (*.osteon)")
+        if not path:
+            return
+        try:
+            state, vol, meshes = casemod.load_case(path)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Abrir caso", str(e))
+            return
+        if vol is not None:
+            self.vol = vol
+            self.slice_view.set_volume(vol)
+        pt = state.get("patient", {})
+        self.patient.nome.setText(pt.get("nome", "")); self.patient.nasc.setText(pt.get("nasc", "")); self.patient.reg.setText(pt.get("registro", ""))
+        mp = state.get("model_params", {})
+        if mp:
+            self.model_panel.hu.setValue(int(mp.get("hu", 300)))
+            self.model_panel.smooth.setValue(int(mp.get("smooth", 15)))
+            self.model_panel.dec.setValue(float(mp.get("dec", 0.0)))
+            self.model_panel.largest.setChecked(bool(mp.get("largest", False)))
+        self.mesh = meshes.get("model")
+        if _HAS_VTK:
+            self.frags = []
+            for i, meta in enumerate(state.get("segment", {}).get("fragments", [])):
+                poly = meshes.get(f"frag_{i:03d}")
+                if poly is None:
+                    continue
+                self.frags.append(dict(poly=poly, color=tuple(meta.get("color", PALETTE[0])),
+                                       center=self._poly_center(poly), move=meta.get("move") or self._zero_move(),
+                                       name=meta.get("name", f"frag {i}"), visible=meta.get("visible", True)))
+            reg = state.get("register", {})
+            self.reg_imp = meshes.get("imported")
+            tg = reg.get("treg")
+            self.reg_treg = np.asarray(tg, float) if tg else regmod.identity()
+            self.register_view.anat_lm = [list(map(float, p)) for p in reg.get("anat_lm", [])]
+            self.register_view.imp_lm = [list(map(float, p)) for p in reg.get("imp_lm", [])]
+            self.register_view._refresh_markers()
+            man = reg.get("manual", {})
+            rp = self.register_panel
+            for k, w in (("tx", rp.tx), ("ty", rp.ty), ("tz", rp.tz), ("rx", rp.rx), ("ry", rp.ry), ("rz", rp.rz), ("sc", rp.sc)):
+                if k in man:
+                    w.blockSignals(True); w.setValue(float(man[k])); w.blockSignals(False)
+            rp.scale.setChecked(bool(reg.get("scale", False)))
+            cl = state.get("ceph", {}).get("landmarks", {})
+            self.ceph_view.landmarks = {k: (int(v[0]), int(v[1])) for k, v in cl.items()}
+        self.set_mode("2d")
+        self.statusBar().showMessage(f"Caso aberto: {path}")
 
     # -- modos --------------------------------------------------------------
     def set_mode(self, key):
@@ -435,7 +552,8 @@ class MainWindow(QtWidgets.QMainWindow):
         p = self.segment_panel
         p.cut.connect(self.on_seg_cut)
         p.planeChanged.connect(self.update_seg_plane)
-        p.explode.connect(self.on_seg_explode)
+        p.moveChanged.connect(self.on_seg_move)
+        p.measure.connect(self.on_seg_measure)
         p.reset.connect(self.on_seg_reset)
         p.exportOne.connect(lambda: self.on_seg_export(False))
         p.exportAll.connect(lambda: self.on_seg_export(True))
@@ -453,8 +571,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack.setCurrentIndex(2)
         self.segment_view.start()
         if not self.frags:
-            self.frags = [dict(poly=self.mesh, color=PALETTE[0], offset=[0, 0, 0],
-                               dir=[0, 0, 0], name="Osso (original)", visible=True, amt=0)]
+            self.frags = [dict(poly=self.mesh, color=PALETTE[0], center=self._poly_center(self.mesh),
+                               move=self._zero_move(), name="Osso (original)", visible=True)]
             self.seg_sel = 0
         self.seg_bounds = self.mesh.GetBounds()
         self._seg_refresh_list()
@@ -472,7 +590,23 @@ class MainWindow(QtWidgets.QMainWindow):
         c.blockSignals(False)
         f = self.frags[self.seg_sel]
         self.segment_panel.vis.blockSignals(True); self.segment_panel.vis.setChecked(f["visible"]); self.segment_panel.vis.blockSignals(False)
-        self.segment_panel.explodeS.blockSignals(True); self.segment_panel.explodeS.setValue(int(f.get("amt", 0))); self.segment_panel.explodeS.blockSignals(False)
+        self.segment_panel.set_move(f.get("move"))
+
+    def _zero_move(self):
+        return dict(tx=0, ty=0, tz=0, rx=0, ry=0, rz=0)
+
+    def _poly_center(self, poly):
+        b = poly.GetBounds()
+        return [(b[0]+b[1])/2, (b[2]+b[3])/2, (b[4]+b[5])/2]
+
+    def _frag_transform(self, center, mv):
+        # replica a transformação do ator VTK (origem = centroide; ordem Z,X,Y)
+        tr = _vtk.vtkTransform(); tr.PostMultiply()
+        tr.Translate(-center[0], -center[1], -center[2])
+        tr.RotateZ(mv.get("rz", 0)); tr.RotateX(mv.get("rx", 0)); tr.RotateY(mv.get("ry", 0))
+        tr.Translate(center[0], center[1], center[2])
+        tr.Translate(mv.get("tx", 0), mv.get("ty", 0), mv.get("tz", 0))
+        return tr
 
     def _seg_normal(self):
         return segmod.plane_normal(self.segment_panel.axis.currentIndex(),
@@ -493,7 +627,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.seg_sel = max(0, self.segment_panel.sel.currentIndex())
         f = self.frags[self.seg_sel]
         self.segment_panel.vis.blockSignals(True); self.segment_panel.vis.setChecked(f["visible"]); self.segment_panel.vis.blockSignals(False)
-        self.segment_panel.explodeS.blockSignals(True); self.segment_panel.explodeS.setValue(int(f.get("amt", 0))); self.segment_panel.explodeS.blockSignals(False)
+        self.segment_panel.set_move(f.get("move"))
 
     def on_seg_vis(self):
         self.frags[self.seg_sel]["visible"] = self.segment_panel.vis.isChecked()
@@ -515,21 +649,36 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         ca = PALETTE[len(self.frags) % len(PALETTE)]
         cb = PALETTE[(len(self.frags) + 1) % len(PALETTE)]
-        A = dict(poly=a, color=ca, offset=[0, 0, 0], dir=list(n), name=f["name"] + " · A", visible=True, amt=0)
-        B = dict(poly=b, color=cb, offset=[0, 0, 0], dir=list(-n), name=f["name"] + " · B", visible=True, amt=0)
+        A = dict(poly=a, color=ca, center=self._poly_center(a), move=self._zero_move(), name=f["name"] + " · A", visible=True)
+        B = dict(poly=b, color=cb, center=self._poly_center(b), move=self._zero_move(), name=f["name"] + " · B", visible=True)
         self.frags[self.seg_sel:self.seg_sel + 1] = [A, B]
         self._seg_refresh_list()
         self.segment_view.set_fragments(self.frags)
         self.segment_panel.info.setText(
             f"Fragmentos: {len(self.frags)} · A {a.GetNumberOfCells():,} / B {b.GetNumberOfCells():,} tri".replace(",", "."))
 
-    def on_seg_explode(self):
+    def on_seg_move(self):
         f = self.frags[self.seg_sel]
-        amt = self.segment_panel.explodeS.value()
-        f["amt"] = amt
-        d = f.get("dir", [0, 0, 0])
-        f["offset"] = [d[0] * amt, d[1] * amt, d[2] * amt]
-        self.segment_view.update_offset(self.seg_sel, f["offset"])
+        f["move"] = self.segment_panel.move()
+        self.segment_view.update_transform(self.seg_sel, f["center"], f["move"])
+        mv = f["move"]
+        disp = (mv["tx"] ** 2 + mv["ty"] ** 2 + mv["tz"] ** 2) ** 0.5
+        self.segment_panel.info.setText(
+            f"Deslocamento {disp:.1f} mm · rot ({mv['rx']:.0f}, {mv['ry']:.0f}, {mv['rz']:.0f})°")
+
+    def on_seg_measure(self):
+        if not _HAS_VTK or not self.frags:
+            return
+        from ..core import measure as measmod
+        f = self.frags[self.seg_sel]
+        try:
+            vol_mm3, area_mm2 = measmod.volume_area(f["poly"])
+        except Exception as e:
+            self.segment_panel.info.setText(f"Falha ao medir: {e}")
+            return
+        self.segment_panel.info.setText(
+            f"{f['name']}: volume {vol_mm3/1000.0:.2f} cm³ · área {area_mm2/100.0:.2f} cm²\n"
+            f"(volume confiável só com a face fechada)")
 
     def on_seg_reset(self):
         self.frags = []
@@ -547,7 +696,8 @@ class MainWindow(QtWidgets.QMainWindow):
         f = self.frags[self.seg_sel]
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
-            mask = self.segment_view.classify_lasso(f["poly"], f["offset"], pts)
+            mv = f.get("move") or self._zero_move()
+            mask = self.segment_view.classify_lasso(f["poly"], (mv["tx"], mv["ty"], mv["tz"]), pts)
             inside, outside = segmod.split_by_mask(f["poly"], mask)
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
@@ -556,19 +706,19 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         ca = PALETTE[len(self.frags) % len(PALETTE)]
         cb = PALETTE[(len(self.frags) + 1) % len(PALETTE)]
-        A = dict(poly=inside, color=ca, offset=[0, 0, 0], dir=[0, 0, 0], name=f["name"] + " · dentro", visible=True, amt=0)
-        B = dict(poly=outside, color=cb, offset=[0, 0, 0], dir=[0, 0, 0], name=f["name"] + " · fora", visible=True, amt=0)
+        A = dict(poly=inside, color=ca, center=self._poly_center(inside), move=self._zero_move(), name=f["name"] + " · dentro", visible=True)
+        B = dict(poly=outside, color=cb, center=self._poly_center(outside), move=self._zero_move(), name=f["name"] + " · fora", visible=True)
         self.frags[self.seg_sel:self.seg_sel + 1] = [A, B]
         self.segment_panel.b_lasso.setChecked(False)
         self._seg_refresh_list()
         self.segment_view.set_fragments(self.frags)
         self.segment_panel.info.setText(f"Separado pelo laço · {len(self.frags)} fragmentos.")
 
-    def _translated(self, poly, offset):
-        if not any(offset):
-            return poly
-        t = _vtk.vtkTransform(); t.Translate(float(offset[0]), float(offset[1]), float(offset[2]))
-        tf = _vtk.vtkTransformPolyDataFilter(); tf.SetTransform(t); tf.SetInputData(poly); tf.Update()
+    def _baked(self, f):
+        """Aplica a transformação (reposicionamento) do fragmento à malha."""
+        tf = _vtk.vtkTransformPolyDataFilter()
+        tf.SetTransform(self._frag_transform(f["center"], f.get("move") or self._zero_move()))
+        tf.SetInputData(f["poly"]); tf.Update()
         return tf.GetOutput()
 
     # -- cefalometria -------------------------------------------------------
@@ -790,7 +940,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             app = _vtk.vtkAppendPolyData()
             for f in self.frags:
-                app.AddInputData(self._translated(f["poly"], f["offset"]))
+                app.AddInputData(self._baked(f))
             app.Update()
             meshmod.write_stl(app.GetOutput(), path, binary=True)
         else:
@@ -799,7 +949,7 @@ class MainWindow(QtWidgets.QMainWindow):
             path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Exportar fragmento", default, "STL (*.stl)")
             if not path:
                 return
-            meshmod.write_stl(self._translated(f["poly"], f["offset"]), path, binary=True)
+            meshmod.write_stl(self._baked(f), path, binary=True)
         self.statusBar().showMessage(f"STL salvo: {path}")
 
     # -- modelo -------------------------------------------------------------

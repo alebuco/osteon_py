@@ -1,5 +1,13 @@
 # Changelog — Osteon Viewer
 
+## 0.0.4 — 2026-11-11
+- **Planejamento de osteotomia**: reposicionamento de cada fragmento por
+  translação (X/Y/Z) e rotação (X/Y/Z) em torno do próprio centroide, com
+  leitura do deslocamento; exportação já com a transformação aplicada.
+- **Medições**: volume (cm³) e área (cm²) por fragmento via vtkMassProperties.
+- **Casos**: salvar/abrir um arquivo único `.osteon` (zip) com estado (JSON),
+  volume (npz comprimido) e malhas (STL) — reabre tudo sem o DICOM original.
+
 ## 0.0.3 — 2026-11-11
 - **MPR**: reconstrução multiplanar (axial/coronal/sagital) com cursor
   sincronizado, proporção física e janelamento (Qt puro).

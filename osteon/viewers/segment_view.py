@@ -108,17 +108,24 @@ class SegmentView(QtWidgets.QWidget):
             a.SetMapper(m)
             a.GetProperty().SetColor(*f["color"])
             a.GetProperty().SetInterpolationToPhong()
-            off = f.get("offset", (0, 0, 0))
-            a.SetPosition(float(off[0]), float(off[1]), float(off[2]))
+            self._apply_actor_transform(a, f.get("center"), f.get("move"))
             self.ren.AddActor(a)
             self.frag_actors.append(a)
         self.ren.ResetCamera()
         self.render()
 
-    def update_offset(self, i, offset):
+    @staticmethod
+    def _apply_actor_transform(a, center, mv):
+        if center is not None:
+            a.SetOrigin(float(center[0]), float(center[1]), float(center[2]))
+        if mv:
+            a.SetOrientation(float(mv.get("rx", 0)), float(mv.get("ry", 0)), float(mv.get("rz", 0)))
+            a.SetPosition(float(mv.get("tx", 0)), float(mv.get("ty", 0)), float(mv.get("tz", 0)))
+
+    def update_transform(self, i, center, mv):
         a = self.frag_actors[i] if i < len(self.frag_actors) else None
         if a is not None:
-            a.SetPosition(float(offset[0]), float(offset[1]), float(offset[2]))
+            self._apply_actor_transform(a, center, mv)
             self.render()
 
     # -- plano --------------------------------------------------------------
