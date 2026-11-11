@@ -1,0 +1,6 @@
+PySide6>=6.6,<6.9
+vtk>=9.3
+pydicom>=2.4
+numpy>=1.24
+scipy>=1.10
+scikit-image>=0.22
