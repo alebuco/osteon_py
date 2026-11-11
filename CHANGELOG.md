@@ -1,5 +1,14 @@
 # Changelog — Osteon Viewer
 
+## 0.0.5 — 2026-11-11
+- Segmentar: lista de **objetos com multisseleção**, cada corte gera objetos
+  novos independentes.
+- **Operações booleanas**: unir e subtrair objetos selecionados
+  (vtkBooleanOperationPolyDataFilter), aplicadas já na posição atual.
+- **Cor por objeto** (seletor de cor) e **ocultar/mostrar** objetos
+  selecionados (e por caixa de seleção na lista).
+- Exportar exporta os objetos selecionados (um ou vários).
+
 ## 0.0.4 — 2026-11-11
 - **Planejamento de osteotomia**: reposicionamento de cada fragmento por
   translação (X/Y/Z) e rotação (X/Y/Z) em torno do próprio centroide, com

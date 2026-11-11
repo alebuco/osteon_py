@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "osteon-viewer"
-version = "0.0.4"
+version = "0.0.5"
 description = "Visualizador DICOM clean-room: 2D/MPR/3D, modelo STL, segmentacao e registro."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -40,5 +40,5 @@ if [ ! -f "$TOOL" ]; then
   chmod +x "$TOOL"
 fi
 
-ARCH=x86_64 "$TOOL" "$APPDIR" "dist/OsteonViewer-0.0.4-x86_64.AppImage"
-echo "AppImage gerado em dist/OsteonViewer-0.0.4-x86_64.AppImage"
+ARCH=x86_64 "$TOOL" "$APPDIR" "dist/OsteonViewer-0.0.5-x86_64.AppImage"
+echo "AppImage gerado em dist/OsteonViewer-0.0.5-x86_64.AppImage"

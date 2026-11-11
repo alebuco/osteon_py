@@ -1,4 +1,4 @@
-# Osteon Viewer — versão Python (desktop) · v0.0.4
+# Osteon Viewer — versão Python (desktop) · v0.0.5
 
 Reescrita do Osteon como aplicativo de desktop em **Python**, com interface
 **PySide6 (Qt6)** e núcleo de imagem médica em **VTK** + numpy/scipy/scikit-image.
@@ -18,12 +18,13 @@ Gera instaladores para **Windows** (.exe) e **Linux** (AppImage).
   transferência para osso.
 - **Modelo (STL)**: isosuperfície (flying edges) por limiar HU, suavização
   Taubin, decimação, maior componente e exportação STL (binário/ASCII).
-- **Segmentar / osteotomia**: corte por **plano** (eixo + posição + duas
-  inclinações) com **tampa sólida** via `vtkClipClosedSurface` (fragmentos
-  watertight), **corte por laço**, **reposicionamento** de cada fragmento
-  (translação X/Y/Z + rotação X/Y/Z em torno do centroide), **medição de
-  volume/área** (vtkMassProperties) e exportação STL (com a transformação
-  aplicada) por fragmento ou de todos juntos.
+- **Segmentar / osteotomia**: cada corte cria objetos novos; **lista de objetos
+  com multisseleção**, **cor por objeto**, **ocultar/mostrar**. Corte por
+  **plano** (eixo + posição + duas inclinações) com **tampa sólida**
+  (`vtkClipClosedSurface`, watertight) e **corte por laço**. **Operações
+  booleanas** (unir/subtrair), **reposicionamento** (translação + rotação em
+  torno do centroide), **medição de volume/área** (vtkMassProperties) e
+  exportação STL (com a transformação aplicada) dos selecionados ou de todos.
 - **Registro / Sobreposição**: importa um STL e o alinha ao modelo em duas
   janelas lado a lado — pontos correspondentes (`vtkCellPicker`), registro por
   landmarks (`vtkLandmarkTransform`, rígido ou com escala), refino **ICP**

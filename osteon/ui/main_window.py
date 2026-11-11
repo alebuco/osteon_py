@@ -71,12 +71,26 @@ class SegmentPanel(QtWidgets.QGroupBox):
     exportAll = QtCore.Signal()
     lassoToggled = QtCore.Signal(bool)
     fragSelected = QtCore.Signal()
-    visChanged = QtCore.Signal()
+    visChanged = QtCore.Signal(int, bool)
+    colorSel = QtCore.Signal()
+    hideSel = QtCore.Signal(bool)         # True = mostrar, False = ocultar
+    unionSel = QtCore.Signal()
+    subtractSel = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__("Segmentar", parent)
-        self.sel = QtWidgets.QComboBox(); self.sel.currentIndexChanged.connect(self.fragSelected)
-        self.vis = QtWidgets.QCheckBox("Visível"); self.vis.setChecked(True); self.vis.toggled.connect(self.visChanged)
+        self.listw = QtWidgets.QListWidget()
+        self.listw.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.listw.setMaximumHeight(150)
+        self.listw.itemSelectionChanged.connect(self.fragSelected)
+        self.listw.itemChanged.connect(self._on_item_changed)
+
+        b_color = QtWidgets.QPushButton("Cor…"); b_color.clicked.connect(self.colorSel)
+        b_hide = QtWidgets.QPushButton("Ocultar"); b_hide.clicked.connect(lambda: self.hideSel.emit(False))
+        b_show = QtWidgets.QPushButton("Mostrar"); b_show.clicked.connect(lambda: self.hideSel.emit(True))
+        b_union = QtWidgets.QPushButton("Unir"); b_union.clicked.connect(self.unionSel)
+        b_sub = QtWidgets.QPushButton("Subtrair"); b_sub.clicked.connect(self.subtractSel)
+
         self.axis = QtWidgets.QComboBox(); self.axis.addItems(["X (sagital)", "Y (coronal)", "Z (axial)"]); self.axis.setCurrentIndex(2)
         self.pos = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.pos.setRange(0, 100); self.pos.setValue(50)
         self.ta = QtWidgets.QSpinBox(); self.ta.setRange(-90, 90)
@@ -87,10 +101,8 @@ class SegmentPanel(QtWidgets.QGroupBox):
         self.mrx = self._mspin(-180, 180); self.mry = self._mspin(-180, 180); self.mrz = self._mspin(-180, 180)
         self.info = QtWidgets.QLabel(""); self.info.setWordWrap(True); self.info.setStyleSheet("color:#9bb;font-size:11px;")
 
-        for w in (self.axis,):
-            w.currentIndexChanged.connect(self.planeChanged)
-        for w in (self.pos,):
-            w.valueChanged.connect(self.planeChanged)
+        self.axis.currentIndexChanged.connect(self.planeChanged)
+        self.pos.valueChanged.connect(self.planeChanged)
         for w in (self.ta, self.tb):
             w.valueChanged.connect(self.planeChanged)
         self.showPlane.toggled.connect(self.planeChanged)
@@ -98,8 +110,6 @@ class SegmentPanel(QtWidgets.QGroupBox):
             w.valueChanged.connect(self.moveChanged)
 
         form = QtWidgets.QFormLayout()
-        form.addRow("Fragmento", self.sel)
-        form.addRow(self.vis)
         form.addRow("Eixo base", self.axis)
         form.addRow("Posição", self.pos)
         form.addRow("Inclinação A", self.ta)
@@ -112,7 +122,7 @@ class SegmentPanel(QtWidgets.QGroupBox):
         self.b_lasso.toggled.connect(self.lassoToggled)
         b_reset = QtWidgets.QPushButton("Resetar"); b_reset.clicked.connect(self.reset)
         b_meas = QtWidgets.QPushButton("Volume / área"); b_meas.clicked.connect(self.measure)
-        b_e1 = QtWidgets.QPushButton("Exportar fragmento"); b_e1.clicked.connect(self.exportOne)
+        b_e1 = QtWidgets.QPushButton("Exportar sel."); b_e1.clicked.connect(self.exportOne)
         b_e2 = QtWidgets.QPushButton("Exportar todos"); b_e2.clicked.connect(self.exportAll)
 
         repo = QtWidgets.QGroupBox("Reposicionar (osteotomia)")
@@ -121,6 +131,10 @@ class SegmentPanel(QtWidgets.QGroupBox):
         rf.addRow("Rot. X/Y/Z", self._row(self.mrx, self.mry, self.mrz))
 
         lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(QtWidgets.QLabel("Objetos"))
+        lay.addWidget(self.listw)
+        lay.addLayout(self._row(b_color, b_hide, b_show))
+        lay.addLayout(self._row(b_union, b_sub))
         lay.addLayout(form)
         lay.addWidget(b_cut)
         lay.addWidget(self.b_lasso)
@@ -129,6 +143,38 @@ class SegmentPanel(QtWidgets.QGroupBox):
         lay.addWidget(self.info)
         row = QtWidgets.QHBoxLayout(); row.addWidget(b_e1); row.addWidget(b_e2); lay.addLayout(row)
         lay.addWidget(b_reset)
+
+    def _on_item_changed(self, item):
+        self.visChanged.emit(self.listw.row(item), item.checkState() == QtCore.Qt.Checked)
+
+    @staticmethod
+    def _swatch(color):
+        pm = QtGui.QPixmap(14, 14)
+        pm.fill(QtGui.QColor(int(color[0] * 255), int(color[1] * 255), int(color[2] * 255)))
+        return QtGui.QIcon(pm)
+
+    def set_fragments(self, frags, keep_sel=None):
+        self.listw.blockSignals(True)
+        self.listw.clear()
+        for f in frags:
+            it = QtWidgets.QListWidgetItem(self._swatch(f["color"]), f["name"])
+            it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
+            it.setCheckState(QtCore.Qt.Checked if f["visible"] else QtCore.Qt.Unchecked)
+            self.listw.addItem(it)
+        self.listw.blockSignals(False)
+        if keep_sel:
+            for r in keep_sel:
+                if 0 <= r < self.listw.count():
+                    self.listw.item(r).setSelected(True)
+        elif self.listw.count():
+            self.listw.item(0).setSelected(True)
+
+    def selected_indices(self):
+        return sorted(self.listw.row(i) for i in self.listw.selectedItems())
+
+    def primary(self):
+        idx = self.selected_indices()
+        return idx[0] if idx else -1
 
     def _mspin(self, lo, hi):
         s = QtWidgets.QDoubleSpinBox(); s.setRange(lo, hi); s.setSingleStep(0.5); s.setValue(0); return s
@@ -560,6 +606,10 @@ class MainWindow(QtWidgets.QMainWindow):
         p.lassoToggled.connect(self.on_seg_lasso_toggle)
         p.fragSelected.connect(self.on_seg_frag_selected)
         p.visChanged.connect(self.on_seg_vis)
+        p.colorSel.connect(self.on_seg_color)
+        p.hideSel.connect(self.on_seg_hide)
+        p.unionSel.connect(lambda: self.on_seg_boolean("union"))
+        p.subtractSel.connect(lambda: self.on_seg_boolean("difference"))
 
     def enter_segment(self):
         if self.vol is None:
@@ -579,18 +629,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.segment_view.set_fragments(self.frags)
         self.update_seg_plane()
 
-    def _seg_refresh_list(self):
-        c = self.segment_panel.sel
-        c.blockSignals(True)
-        c.clear()
-        for i, f in enumerate(self.frags):
-            c.addItem(f["name"], i)
-        self.seg_sel = min(self.seg_sel, len(self.frags) - 1)
-        c.setCurrentIndex(self.seg_sel)
-        c.blockSignals(False)
-        f = self.frags[self.seg_sel]
-        self.segment_panel.vis.blockSignals(True); self.segment_panel.vis.setChecked(f["visible"]); self.segment_panel.vis.blockSignals(False)
-        self.segment_panel.set_move(f.get("move"))
+    def _seg_refresh_list(self, keep_sel=None):
+        if keep_sel is None:
+            keep_sel = [self.seg_sel] if 0 <= self.seg_sel < len(self.frags) else [0]
+        self.segment_panel.set_fragments(self.frags, keep_sel=keep_sel)
+        self.seg_sel = self.segment_panel.primary()
+        if 0 <= self.seg_sel < len(self.frags):
+            self.segment_panel.set_move(self.frags[self.seg_sel].get("move"))
 
     def _zero_move(self):
         return dict(tx=0, ty=0, tz=0, rx=0, ry=0, rz=0)
@@ -624,17 +669,69 @@ class MainWindow(QtWidgets.QMainWindow):
         self.segment_view.set_plane(origin, n, size)
 
     def on_seg_frag_selected(self):
-        self.seg_sel = max(0, self.segment_panel.sel.currentIndex())
-        f = self.frags[self.seg_sel]
-        self.segment_panel.vis.blockSignals(True); self.segment_panel.vis.setChecked(f["visible"]); self.segment_panel.vis.blockSignals(False)
-        self.segment_panel.set_move(f.get("move"))
+        self.seg_sel = self.segment_panel.primary()
+        if 0 <= self.seg_sel < len(self.frags):
+            self.segment_panel.set_move(self.frags[self.seg_sel].get("move"))
 
-    def on_seg_vis(self):
-        self.frags[self.seg_sel]["visible"] = self.segment_panel.vis.isChecked()
+    def on_seg_vis(self, i, checked):
+        if 0 <= i < len(self.frags):
+            self.frags[i]["visible"] = checked
+            self.segment_view.set_fragments(self.frags)
+
+    def on_seg_color(self):
+        idx = self.segment_panel.selected_indices()
+        if not idx:
+            return
+        f0 = self.frags[idx[0]]
+        init = QtGui.QColor(int(f0["color"][0] * 255), int(f0["color"][1] * 255), int(f0["color"][2] * 255))
+        c = QtWidgets.QColorDialog.getColor(init, self, "Cor do objeto")
+        if not c.isValid():
+            return
+        rgb = (c.redF(), c.greenF(), c.blueF())
+        for i in idx:
+            self.frags[i]["color"] = rgb
+        self._seg_refresh_list(keep_sel=idx)
         self.segment_view.set_fragments(self.frags)
 
+    def on_seg_hide(self, show):
+        idx = self.segment_panel.selected_indices()
+        for i in idx:
+            self.frags[i]["visible"] = bool(show)
+        self._seg_refresh_list(keep_sel=idx)
+        self.segment_view.set_fragments(self.frags)
+
+    def on_seg_boolean(self, op):
+        from ..core import boolean as boolmod
+        idx = self.segment_panel.selected_indices()
+        if len(idx) < 2:
+            self.segment_panel.info.setText("Selecione 2 objetos (o 1º é a base).")
+            return
+        try:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            base = self._baked(self.frags[idx[0]])
+            for j in idx[1:]:
+                base = boolmod.boolean(op, base, self._baked(self.frags[j]))
+        except Exception as e:
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self.segment_panel.info.setText(f"Falha na operação: {e}")
+            return
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        if base is None or base.GetNumberOfCells() == 0:
+            self.segment_panel.info.setText("Resultado vazio (malhas precisam estar fechadas e se tocar).")
+            return
+        name = ("União" if op == "union" else "Subtração") + f" ({len(idx)})"
+        newf = dict(poly=base, color=PALETTE[len(self.frags) % len(PALETTE)],
+                    center=self._poly_center(base), move=self._zero_move(), name=name, visible=True)
+        self.frags = [f for k, f in enumerate(self.frags) if k not in idx] + [newf]
+        self.seg_sel = len(self.frags) - 1
+        self._seg_refresh_list(keep_sel=[self.seg_sel])
+        self.segment_view.set_fragments(self.frags)
+        self.segment_panel.info.setText(f"{name}: {base.GetNumberOfCells():,} triângulos.".replace(",", "."))
+
     def on_seg_cut(self):
-        if not self.frags:
+        self.seg_sel = self.segment_panel.primary()
+        if not self.frags or self.seg_sel < 0:
             return
         f = self.frags[self.seg_sel]
         n = self._seg_normal()
@@ -658,6 +755,9 @@ class MainWindow(QtWidgets.QMainWindow):
             f"Fragmentos: {len(self.frags)} · A {a.GetNumberOfCells():,} / B {b.GetNumberOfCells():,} tri".replace(",", "."))
 
     def on_seg_move(self):
+        self.seg_sel = self.segment_panel.primary()
+        if self.seg_sel < 0:
+            return
         f = self.frags[self.seg_sel]
         f["move"] = self.segment_panel.move()
         self.segment_view.update_transform(self.seg_sel, f["center"], f["move"])
@@ -670,6 +770,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not _HAS_VTK or not self.frags:
             return
         from ..core import measure as measmod
+        self.seg_sel = self.segment_panel.primary()
         f = self.frags[self.seg_sel]
         try:
             vol_mm3, area_mm2 = measmod.volume_area(f["poly"])
@@ -693,6 +794,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_seg_lasso_done(self, pts):
         if not self.frags:
             return
+        self.seg_sel = self.segment_panel.primary()
         f = self.frags[self.seg_sel]
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
@@ -944,12 +1046,21 @@ class MainWindow(QtWidgets.QMainWindow):
             app.Update()
             meshmod.write_stl(app.GetOutput(), path, binary=True)
         else:
-            f = self.frags[self.seg_sel]
+            idx = self.segment_panel.selected_indices() or ([self.seg_sel] if self.seg_sel >= 0 else [])
+            if not idx:
+                return
             default = f"fragmento-{slug}.stl"
-            path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Exportar fragmento", default, "STL (*.stl)")
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Exportar selecionados", default, "STL (*.stl)")
             if not path:
                 return
-            meshmod.write_stl(self._baked(f), path, binary=True)
+            if len(idx) == 1:
+                meshmod.write_stl(self._baked(self.frags[idx[0]]), path, binary=True)
+            else:
+                app = _vtk.vtkAppendPolyData()
+                for i in idx:
+                    app.AddInputData(self._baked(self.frags[i]))
+                app.Update()
+                meshmod.write_stl(app.GetOutput(), path, binary=True)
         self.statusBar().showMessage(f"STL salvo: {path}")
 
     # -- modelo -------------------------------------------------------------
